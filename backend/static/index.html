@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TalentOps Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            claude: {
+              orange: '#D97757',
+              'orange-hover': '#C2410C',
+              'orange-soft': '#FAE5D6',
+              'orange-tint': '#FEF3EC',
+              cream: '#FAF9F5',
+              'cream-2': '#F4F0EA',
+              ink: '#1F1B16',
+              'ink-2': '#2A211B',
+              muted: '#6B6258',
+              border: '#E8E0D5',
+            },
+          },
+          fontFamily: {
+            sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+            display: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    .pill { display:inline-flex; align-items:center; gap:0.3rem; padding:0.15rem 0.6rem; border-radius:999px; font-size:0.72rem; font-weight:600; }
+    .pill-meets, .pill-present, .pill-none { background:#D4ECE0; color:#0F5132; }
+    .pill-partially, .pill-minor, .pill-absent { background:#FAE5D6; color:#92400E; }
+    .pill-doesnot, .pill-major { background:#F8D7DA; color:#842029; }
+    code { background:#FEF3EC; padding:0.05rem 0.35rem; border-radius:4px; font-size:0.85em; color:#7C2D12; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { box-shadow: 0 10px 30px -10px rgba(31, 27, 22, 0.18); transform: translateY(-2px); }
+    .dropzone { transition: all 0.2s ease; }
+    .dropzone.drag-over { border-color: #D97757; background: #FEF3EC; transform: scale(1.005); }
+    @keyframes pulse-orange { 0% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0.5); } 70% { box-shadow: 0 0 0 12px rgba(217, 119, 87, 0); } 100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0); } }
+    .step-active { animation: pulse-orange 1.6s infinite; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fade-in 0.3s ease-out; }
+    .grain { background-image: radial-gradient(circle at 50% 50%, rgba(31,27,22,0.04) 0.5px, transparent 1px); background-size: 3px 3px; }
+    .btn-primary { background: linear-gradient(135deg, #D97757, #C2410C); color: white; transition: all 0.18s ease; }
+    .btn-primary:hover { box-shadow: 0 8px 20px -6px rgba(194, 65, 12, 0.45); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    details > summary { list-style: none; cursor: pointer; }
+    details > summary::-webkit-details-marker { display: none; }
+    details[open] .chev { transform: rotate(90deg); }
+    .chev { transition: transform 0.18s ease; }
+    .ring-active { box-shadow: 0 0 0 4px rgba(217,119,87,0.15); }
+  </style>
+</head>
+<body class="min-h-screen bg-claude-cream text-claude-ink">
+
+<header class="bg-claude-ink text-claude-cream relative overflow-hidden">
+  <div class="absolute inset-x-0 bottom-0 h-0.5 bg-claude-orange"></div>
+  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center gap-4">
+    <div class="w-11 h-11 rounded-xl bg-claude-orange flex items-center justify-center shadow-lg shadow-claude-orange/30">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12a3 3 0 11-6 0 3 3 0 016 0zm12 0a3 3 0 11-6 0 3 3 0 016 0zm-9 6a3 3 0 11-6 0 3 3 0 016 0zm12 0a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    </div>
+    <div class="flex-1">
+      <h1 class="text-xl font-semibold tracking-tight">TalentOps Agent</h1>
+      <p class="text-xs text-claude-cream/70">Drop resumes, paste a JD — get a panel-ready briefing in minutes.</p>
+    </div>
+    <div id="provider-pill" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-xs">
+      <span class="w-1.5 h-1.5 rounded-full bg-claude-orange"></span>
+      <span id="provider-label">…</span>
+    </div>
+  </div>
+</header>
+
+<main id="root" class="max-w-6xl mx-auto p-6 space-y-6"></main>
+
+<footer class="max-w-6xl mx-auto px-6 pb-8 text-xs text-claude-muted">
+  AI-assisted analysis — recruiter review required. Built on FastAPI + Anthropic SDK.
+</footer>
+
+<script>
+const STEP_LABELS = {
+  1: "Parse + derive",
+  2: "Profiles",
+  3: "Fitment",
+  4: "Questions",
+  5: "Feedback",
+  6: "Briefing"
+};
+
+const STEP_FULL = {
+  1: "Resumes parsed, checklist derived",
+  2: "Candidate profile extraction",
+  3: "Fitment analysis",
+  4: "Interview question banks",
+  5: "Panelist feedback templates",
+  6: "Comparison, compliance, briefing"
+};
+
+const state = {
+  view: "upload",
+  files: [],
+  roleDescription: "",
+  sessionId: null,
+  pipelineStatus: "queued",
+  pipelineProgress: {},
+  results: null,
+  error: null,
+  health: null,
+  openCandidate: 0,
+  submitting: false,
+};
+
+const root = document.getElementById("root");
+
+const h = (tag, attrs = {}, ...children) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k === "html") el.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return el;
+};
+
+const RATING_ICON = {
+  meets: "✓", present: "✓", none: "✓",
+  partially: "◐", minor: "◐", absent: "○",
+  does: "✕", major: "⚠",
+};
+
+const pill = (rating) => {
+  if (!rating) return h("span", { class: "text-claude-muted/60" }, "—");
+  const norm = rating.toLowerCase();
+  let cls = "pill ";
+  let key = "";
+  if (norm.startsWith("meets")) { cls += "pill-meets"; key = "meets"; }
+  else if (norm.startsWith("partially")) { cls += "pill-partially"; key = "partially"; }
+  else if (norm.startsWith("does")) { cls += "pill-doesnot"; key = "does"; }
+  else if (norm === "present") { cls += "pill-present"; key = "present"; }
+  else if (norm === "absent") { cls += "pill-absent"; key = "absent"; }
+  else if (norm === "none") { cls += "pill-none"; key = "none"; }
+  else if (norm === "minor") { cls += "pill-minor"; key = "minor"; }
+  else if (norm === "major") { cls += "pill-major"; key = "major"; }
+  return h("span", { class: cls }, RATING_ICON[key] || "", rating);
+};
+
+const initials = (name) => (name || "?").split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase() || "").join("");
+
+const fmtSize = (bytes) => bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + " MB" : (bytes / 1024).toFixed(1) + " KB";
+
+async function getHealth() {
+  try {
+    const r = await fetch("/api/v1/health");
+    state.health = await r.json();
+  } catch {
+    state.health = { provider: "unknown" };
+  }
+  const label = document.getElementById("provider-label");
+  if (label) {
+    const p = state.health?.provider || "unknown";
+    label.textContent = p === "mock" ? "Mock mode" : p === "anthropic" ? "Claude Sonnet" : p;
+    document.getElementById("provider-pill")?.classList.remove("hidden");
+  }
+  render();
+}
+
+function handleFiles(input) {
+  const incoming = Array.from(input.files || []).filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+  const existing = new Set(state.files.map((f) => f.name + ":" + f.size));
+  const fresh = incoming.filter((f) => !existing.has(f.name + ":" + f.size));
+  state.files = [...state.files, ...fresh].slice(0, 10);
+  render();
+}
+
+function removeFile(index) {
+  state.files.splice(index, 1);
+  render();
+}
+
+async function submitBatch() {
+  state.error = null;
+  if (state.files.length < 3 || state.files.length > 10) {
+    state.error = "Attach between 3 and 10 PDF resumes.";
+    render(); return;
+  }
+  if (!state.roleDescription.trim()) {
+    state.error = "Paste a role description so we can derive the screening checklist.";
+    render(); return;
+  }
+  state.submitting = true; render();
+
+  const form = new FormData();
+  state.files.forEach((f) => form.append("resumes", f));
+  form.append("role_description", state.roleDescription);
+
+  try {
+    const r = await fetch("/api/v1/ingest", { method: "POST", body: form });
+    if (!r.ok) {
+      const detail = await r.json().catch(() => ({}));
+      throw new Error(detail.detail || `HTTP ${r.status}`);
+    }
+    const data = await r.json();
+    state.sessionId = data.session_id;
+    state.view = "processing";
+    state.pipelineStatus = "processing";
+    state.pipelineProgress = {};
+    state.submitting = false;
+    render();
+    pollStatus();
+  } catch (err) {
+    state.error = err.message;
+    state.submitting = false;
+    render();
+  }
+}
+
+async function pollStatus() {
+  if (!state.sessionId || state.view !== "processing") return;
+  try {
+    const r = await fetch(`/api/v1/session/${state.sessionId}/status`);
+    const data = await r.json();
+    state.pipelineStatus = data.status;
+    state.pipelineProgress = data.step_progress || {};
+    if (data.status === "completed") {
+      const res = await fetch(`/api/v1/session/${state.sessionId}/results`);
+      state.results = await res.json();
+      state.view = "results";
+      render();
+      return;
+    }
+    if (data.status === "failed") {
+      state.error = data.error || "Pipeline failed";
+      state.view = "upload";
+      render();
+      return;
+    }
+    render();
+    setTimeout(pollStatus, 2000);
+  } catch (err) {
+    state.error = err.message;
+    state.view = "upload";
+    render();
+  }
+}
+
+function resetAll() {
+  state.view = "upload";
+  state.sessionId = null;
+  state.results = null;
+  state.pipelineProgress = {};
+  state.error = null;
+  state.openCandidate = 0;
+  render();
+}
+
+function viewError() {
+  if (!state.error) return null;
+  return h("div", { class: "bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-2xl text-sm flex items-start gap-3 fade-in" },
+    h("div", { class: "w-7 h-7 rounded-full bg-rose-500 text-white flex items-center justify-center flex-shrink-0 font-bold" }, "✕"),
+    h("div", { class: "flex-1" }, String(state.error)),
+  );
+}
+
+function viewUpload() {
+  const count = state.files.length;
+  const valid = count >= 3 && count <= 10;
+  const canSubmit = valid && state.roleDescription.trim().length > 0 && !state.submitting;
+
+  const fileInput = h("input", {
+    type: "file",
+    multiple: true,
+    accept: "application/pdf",
+    class: "hidden",
+    onChange: (e) => { handleFiles(e.target); e.target.value = ""; },
+  });
+
+  const uploadIcon = h("div", {
+    class: "w-14 h-14 rounded-2xl bg-claude-orange-soft text-claude-orange-hover flex items-center justify-center",
+    html: '<svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 7.5m0 0L7.5 12m4.5 -4.5V18" /></svg>',
+  });
+
+  const dropzone = h("div", {
+    class: "dropzone border-2 border-dashed border-claude-border rounded-2xl p-6 text-center cursor-pointer hover:border-claude-orange",
+    onClick: () => fileInput.click(),
+    onDragOver: (e) => { e.preventDefault(); e.currentTarget.classList.add("drag-over"); },
+    onDragLeave: (e) => e.currentTarget.classList.remove("drag-over"),
+    onDrop: (e) => {
+      e.preventDefault();
+      e.currentTarget.classList.remove("drag-over");
+      handleFiles({ files: e.dataTransfer.files });
+    },
+  },
+    fileInput,
+    h("div", { class: "flex flex-col items-center gap-3" },
+      uploadIcon,
+      h("div", {},
+        h("p", { class: "text-sm font-semibold text-claude-ink" }, "Drop PDF resumes here"),
+        h("p", { class: "text-xs text-claude-muted mt-1" }, "or click to browse · 3–10 files"),
+      ),
+    ),
+  );
+
+  const statusBadge = count > 0 ? h("div", { class: "flex items-center gap-2 mt-3" },
+    h("div", {
+      class: "px-2.5 py-0.5 rounded-full text-xs font-semibold " +
+        (valid ? "bg-emerald-100 text-emerald-700" : "bg-claude-orange-soft text-claude-orange-hover"),
+    }, `${count}/10`),
+    h("span", { class: "text-xs text-claude-muted" },
+      valid ? "Ready" : count < 3 ? `Need ${3 - count} more` : "Max 10"),
+  ) : null;
+
+  const filePills = count > 0 ? h("div", { class: "flex flex-wrap gap-1.5 mt-2" },
+    ...state.files.map((f, i) => h("span", {
+      class: "inline-flex items-center gap-1.5 bg-claude-cream-2 hover:bg-claude-orange-soft rounded-lg px-2 py-1 text-xs transition-colors",
+      title: f.name,
+    },
+      h("span", { class: "text-[9px] font-bold text-claude-orange-hover" }, "PDF"),
+      h("span", { class: "truncate max-w-[160px]" }, f.name),
+      h("span", { class: "text-claude-muted text-[10px]" }, fmtSize(f.size)),
+      h("button", {
+        type: "button",
+        class: "w-4 h-4 rounded-full hover:bg-rose-100 hover:text-rose-700 text-claude-muted flex items-center justify-center text-sm leading-none",
+        onClick: (e) => { e.stopPropagation(); removeFile(i); },
+        title: "Remove",
+      }, "×"),
+    ))) : null;
+
+  const jdInput = h("textarea", {
+    rows: 11,
+    class: "w-full border border-claude-border rounded-2xl p-4 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-claude-orange/40 focus:border-claude-orange resize-none",
+    placeholder: "We're hiring a Senior Backend Engineer to own our payments platform. You'll design new APIs, lead the migration from monolith to microservices, and mentor 3–4 junior engineers. Stack: Python/FastAPI/PostgreSQL on AWS with Kafka…",
+    onInput: (e) => { state.roleDescription = e.target.value; updateSubmit(); },
+  });
+  jdInput.value = state.roleDescription;
+
+  const jdHint = h("p", { class: "text-xs text-claude-muted mt-2 flex items-center gap-1" },
+    h("span", { class: "text-claude-orange" }, "✦"),
+    h("span", {}, "We'll derive the screening checklist from this — must-haves, red flags, compliance."),
+  );
+
+  const submit = h("button", {
+    id: "submit-btn",
+    type: "button",
+    class: "btn-primary px-6 py-3 rounded-xl font-semibold text-sm shadow-md " + (canSubmit ? "" : "opacity-50 cursor-not-allowed"),
+    disabled: canSubmit ? null : "true",
+    onClick: submitBatch,
+  }, state.submitting ? "Working…" : "Run analysis  →");
+
+  function updateSubmit() {
+    const btn = document.getElementById("submit-btn");
+    if (!btn) return;
+    const ok = state.files.length >= 3 && state.files.length <= 10 && state.roleDescription.trim().length > 0 && !state.submitting;
+    btn.className = "btn-primary px-6 py-3 rounded-xl font-semibold text-sm shadow-md " + (ok ? "" : "opacity-50 cursor-not-allowed");
+    if (ok) btn.removeAttribute("disabled");
+    else btn.setAttribute("disabled", "true");
+  }
+
+  const numLabel = (n, t, sub) => h("div", { class: "flex items-center gap-2 mb-3" },
+    h("div", { class: "w-6 h-6 rounded-full bg-claude-ink text-claude-cream text-xs font-bold flex items-center justify-center" }, String(n)),
+    h("div", {},
+      h("p", { class: "text-sm font-semibold text-claude-ink leading-tight" }, t),
+      sub ? h("p", { class: "text-[11px] text-claude-muted" }, sub) : null,
+    ));
+
+  return h("section", { class: "fade-in" },
+    h("div", { class: "mb-6" },
+      h("h2", { class: "text-2xl font-bold tracking-tight text-claude-ink" }, "Quick start"),
+      h("p", { class: "text-sm text-claude-muted mt-1" }, "Two inputs. We'll derive the rubric, run the pipeline, and hand back a panel briefing."),
+    ),
+    h("div", { class: "bg-white border border-claude-border rounded-3xl p-6 shadow-sm" },
+      h("div", { class: "grid grid-cols-1 md:grid-cols-2 gap-6" },
+        h("div", {},
+          numLabel(1, "Candidate resumes", "PDF · 3–10 files"),
+          dropzone,
+          statusBadge,
+          filePills,
+        ),
+        h("div", {},
+          numLabel(2, "Role description", "Paste the JD"),
+          jdInput,
+          jdHint,
+        ),
+      ),
+      h("div", { class: "flex items-center justify-between mt-6 pt-4 border-t border-claude-border" },
+        h("p", { class: "text-xs text-claude-muted" }, "AI-assisted · recruiter review required"),
+        submit,
+      ),
+    ),
+  );
+}
+
+function viewProcessing() {
+  const steps = Object.entries(STEP_LABELS);
+  const items = [];
+  steps.forEach(([step, label], i) => {
+    const status = state.pipelineProgress[step] || "pending";
+    let circleCls, content, lineCls, labelCls;
+    if (status === "completed") {
+      circleCls = "bg-emerald-500 text-white";
+      content = "✓";
+      lineCls = "bg-emerald-500";
+      labelCls = "text-emerald-700";
+    } else if (status === "in_progress") {
+      circleCls = "bg-claude-orange text-white step-active";
+      content = step;
+      lineCls = "bg-claude-border";
+      labelCls = "text-claude-orange-hover font-semibold";
+    } else {
+      circleCls = "bg-white text-claude-muted border-2 border-claude-border";
+      content = step;
+      lineCls = "bg-claude-border";
+      labelCls = "text-claude-muted";
+    }
+
+    items.push(h("div", { class: "flex flex-col items-center flex-shrink-0", style: "min-width:90px" },
+      h("div", { class: `w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold transition-all ${circleCls}` }, content),
+      h("span", { class: `text-xs mt-2 text-center ${labelCls}` }, label),
+      h("span", { class: "text-[10px] text-claude-muted mt-0.5 text-center" }, STEP_FULL[step]),
+    ));
+    if (i < steps.length - 1) {
+      items.push(h("div", { class: `flex-1 h-1 rounded-full mx-1 mt-5 transition-all ${lineCls}` }));
+    }
+  });
+
+  const completed = Object.values(state.pipelineProgress).filter((s) => s === "completed").length;
+  const overall = state.pipelineStatus === "completed" ? 100 : Math.round((completed / 6) * 100);
+
+  return h("section", { class: "bg-white rounded-3xl shadow-sm p-6 border border-claude-border fade-in" },
+    h("div", { class: "flex items-start justify-between mb-5" },
+      h("div", {},
+        h("h2", { class: "text-xl font-bold text-claude-ink" }, "Working on your batch"),
+        h("p", { class: "text-xs text-claude-muted mt-1" }, `Session ${state.sessionId} · ${state.pipelineStatus}`),
+      ),
+      h("div", { class: "text-right" },
+        h("p", { class: "text-3xl font-bold text-claude-orange" }, `${overall}%`),
+        h("p", { class: "text-[10px] text-claude-muted uppercase tracking-wider" }, "complete"),
+      ),
+    ),
+    h("div", { class: "w-full h-1.5 bg-claude-cream-2 rounded-full overflow-hidden mb-6" },
+      h("div", { class: "h-full bg-claude-orange transition-all duration-500", style: `width: ${overall}%` })),
+    h("div", { class: "flex items-start" }, ...items),
+  );
+}
+
+function viewStats(r) {
+  const candidates = r.candidates || [];
+  const total = candidates.length;
+  const strongFit = candidates.filter((c) =>
+    (c.fitment.must_haves || []).every((m) => m.rating === "Meets")
+  ).length;
+  const redFlags = (r.comparison?.rows || []).filter((row) => row.red_flag_status !== "None").length;
+  const compGaps = (r.compliance_report?.gaps || []).filter((g) => (g.missing_checks || []).length > 0).length;
+
+  const card = (label, value, sub, accent) => h("div", { class: "bg-white border border-claude-border rounded-2xl p-4 card-hover" },
+    h("div", { class: "flex items-start justify-between mb-2" },
+      h("span", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted" }, label),
+      h("div", { class: `w-2 h-2 rounded-full ${accent}` }),
+    ),
+    h("div", { class: "text-3xl font-bold text-claude-ink" }, String(value)),
+    h("div", { class: "text-xs text-claude-muted mt-1" }, sub),
+  );
+
+  return h("section", { class: "grid grid-cols-2 md:grid-cols-4 gap-3 fade-in" },
+    card("Candidates", total, "in this batch", "bg-claude-orange"),
+    card("Strong fit", `${strongFit}/${total}`, "meet all must-haves", "bg-emerald-500"),
+    card("Red flags", redFlags, redFlags === 1 ? "needs probing" : "need probing", "bg-amber-500"),
+    card("Compliance gaps", compGaps, "pending checks", "bg-rose-500"),
+  );
+}
+
+function viewChecklistCard(checklist) {
+  if (!checklist) return null;
+  const list = (items) => h("ul", { class: "space-y-1.5 text-sm text-claude-ink" },
+    ...items.map((it) => h("li", { class: "flex items-start gap-2" },
+      h("span", { class: "text-claude-orange mt-0.5" }, "·"),
+      h("div", {},
+        h("span", { class: "font-medium" }, it.name || it),
+        it.description ? h("span", { class: "text-claude-muted text-xs ml-1" }, "— " + it.description) : null,
+      ),
+    )));
+
+  return h("details", { class: "bg-white border border-claude-border rounded-2xl overflow-hidden fade-in" },
+    h("summary", { class: "p-5 flex items-center gap-3 hover:bg-claude-cream-2 transition-colors" },
+      h("span", { class: "chev text-claude-muted text-sm" }, "▸"),
+      h("div", { class: "flex-1" },
+        h("h2", { class: "text-base font-bold text-claude-ink" }, "Screening checklist used"),
+        h("p", { class: "text-xs text-claude-muted" }, `Auto-derived from your JD · ${checklist.role_title} · min ${checklist.min_years_experience} yrs`),
+      ),
+      h("span", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-orange-hover px-2 py-1 rounded-full bg-claude-orange-soft" }, "AI-derived"),
+    ),
+    h("div", { class: "px-5 pb-5 pt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5 border-t border-claude-border" },
+      h("div", {},
+        h("h3", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-2" }, "Must-haves"),
+        list(checklist.must_have_skills || []),
+      ),
+      h("div", {},
+        h("h3", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-2" }, "Nice-to-haves"),
+        list(checklist.nice_to_have_skills || []),
+      ),
+      h("div", {},
+        h("h3", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-2" }, "Red flag indicators"),
+        list((checklist.red_flag_indicators || []).map((s) => ({ name: s }))),
+      ),
+      h("div", {},
+        h("h3", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-2" }, "Compliance"),
+        list(checklist.compliance_checks || []),
+      ),
+    ),
+  );
+}
+
+function viewComparison(comparison, briefing) {
+  if (!comparison) return null;
+  const skills = [];
+  const seen = new Set();
+  comparison.rows.forEach((row) => {
+    Object.keys(row.must_have_ratings || {}).forEach((s) => {
+      if (!seen.has(s)) { seen.add(s); skills.push(s); }
+    });
+  });
+
+  const briefingBlock = briefing ? h("div", { class: "bg-claude-orange-tint border border-claude-orange/20 rounded-2xl p-4 mb-5 text-sm" },
+    h("div", { class: "flex items-start gap-3" },
+      h("div", { class: "w-7 h-7 rounded-full bg-claude-orange text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5" }, "AI"),
+      h("div", { class: "flex-1" },
+        h("p", { class: "font-semibold text-claude-ink mb-1 leading-snug" }, briefing.headline),
+        briefing.panel_focus_areas?.length ? h("div", {},
+          h("p", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-orange-hover mt-3 mb-1" }, "Panel focus areas"),
+          h("ul", { class: "list-disc pl-5 text-sm text-claude-ink space-y-0.5" }, briefing.panel_focus_areas.map((f) => h("li", {}, f))),
+        ) : null,
+      ),
+    ),
+  ) : null;
+
+  const headerRow = h("tr", { class: "bg-claude-ink text-claude-cream" },
+    h("th", { class: "text-left p-3 rounded-tl-2xl text-xs font-semibold uppercase tracking-wider" }, "Candidate"),
+    ...skills.map((s) => h("th", { class: "text-left p-3 text-xs font-semibold uppercase tracking-wider" }, s)),
+    h("th", { class: "text-left p-3 text-xs font-semibold uppercase tracking-wider" }, "Red flag"),
+    h("th", { class: "text-left p-3 rounded-tr-2xl text-xs font-semibold uppercase tracking-wider" }, "Focus"),
+  );
+
+  const bodyRows = comparison.rows.map((row) => h("tr", { class: "border-b border-claude-border hover:bg-claude-cream-2/50 transition-colors" },
+    h("td", { class: "p-3 font-medium text-claude-ink" }, h("div", { class: "flex items-center gap-2.5" },
+      h("div", { class: "w-8 h-8 rounded-full bg-claude-orange text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0" }, initials(row.candidate_name)),
+      h("span", {}, row.candidate_name),
+    )),
+    ...skills.map((s) => h("td", { class: "p-3" }, pill(row.must_have_ratings?.[s]))),
+    h("td", { class: "p-3" }, pill(row.red_flag_status)),
+    h("td", { class: "p-3 text-xs text-claude-muted" },
+      row.recommended_focus_areas?.length
+        ? h("ul", { class: "list-disc pl-4" }, row.recommended_focus_areas.map((f) => h("li", {}, f)))
+        : "—"),
+  ));
+
+  return h("section", { class: "bg-white rounded-3xl shadow-sm border border-claude-border p-5 fade-in" },
+    h("header", { class: "mb-4" },
+      h("h2", { class: "text-lg font-bold text-claude-ink" }, "Side-by-side comparison"),
+      h("p", { class: "text-xs text-claude-muted" }, `Role · ${comparison.role_title}`)),
+    briefingBlock,
+    h("div", { class: "overflow-x-auto" },
+      h("table", { class: "min-w-full text-sm" }, h("thead", {}, headerRow), h("tbody", {}, bodyRows))),
+  );
+}
+
+function viewCompliance(report) {
+  if (!report) return null;
+  const rows = (report.gaps || []).map((g) => h("tr", { class: "border-b border-claude-border hover:bg-claude-cream-2/50 transition-colors" },
+    h("td", { class: "p-3 font-medium text-claude-ink" }, h("div", { class: "flex items-center gap-2.5" },
+      h("div", { class: "w-8 h-8 rounded-full bg-claude-orange text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0" }, initials(g.candidate_name)),
+      h("span", {}, g.candidate_name),
+    )),
+    h("td", { class: "p-3" },
+      g.missing_checks?.length
+        ? h("div", { class: "flex flex-wrap gap-1" },
+            ...g.missing_checks.map((c) => h("span", { class: "pill pill-doesnot" }, "⚠ ", c)))
+        : h("span", { class: "pill pill-meets" }, "✓ All clear"))));
+
+  return h("section", { class: "bg-white rounded-3xl shadow-sm border border-claude-border p-5 fade-in" },
+    h("header", { class: "mb-4" },
+      h("h2", { class: "text-lg font-bold text-claude-ink" }, "Compliance gaps"),
+      h("p", { class: "text-xs text-claude-muted" }, "Required · " + ((report.all_required_checks || []).join(", ") || "none defined"))),
+    h("div", { class: "overflow-x-auto" },
+      h("table", { class: "min-w-full text-sm" },
+        h("thead", {}, h("tr", { class: "bg-claude-ink text-claude-cream" },
+          h("th", { class: "text-left p-3 rounded-tl-2xl text-xs font-semibold uppercase tracking-wider" }, "Candidate"),
+          h("th", { class: "text-left p-3 rounded-tr-2xl text-xs font-semibold uppercase tracking-wider" }, "Missing required checks"))),
+        h("tbody", {}, rows))),
+  );
+}
+
+function viewCandidate(bundle) {
+  const p = bundle.profile;
+  const f = bundle.fitment;
+
+  return h("article", { class: "bg-white rounded-2xl shadow-sm border border-claude-border p-5 card-hover fade-in" },
+    h("header", { class: "mb-3 flex items-center gap-3" },
+      h("div", { class: "w-11 h-11 rounded-full bg-claude-orange text-white flex items-center justify-center font-bold flex-shrink-0" }, initials(p.full_name)),
+      h("div", { class: "flex-1 min-w-0" },
+        h("h3", { class: "text-base font-bold text-claude-ink truncate" }, p.full_name),
+        h("p", { class: "text-xs text-claude-muted truncate" },
+          `${p.total_years_experience} yrs · ${p.career_progression}${p.email ? " · " + p.email : ""}`),
+      )),
+    h("div", { class: "mb-3" },
+      h("p", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-1.5" }, "Must-haves"),
+      h("div", { class: "flex flex-wrap gap-1" }, ...(f.must_haves || []).map((m) =>
+        h("span", { class: "pill " +
+          (m.rating === "Meets" ? "pill-meets" :
+           m.rating === "Partially Meets" ? "pill-partially" : "pill-doesnot"),
+          title: m.justification }, m.skill + " · " + m.rating)))),
+    f.nice_to_haves?.length ? h("div", { class: "mb-3" },
+      h("p", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-1.5" }, "Nice-to-haves"),
+      h("div", { class: "flex flex-wrap gap-1" }, ...f.nice_to_haves.map((n) =>
+        h("span", { class: "pill " + (n.rating === "Present" ? "pill-present" : "pill-absent") }, n.skill + " · " + n.rating)))) : null,
+    f.red_flags?.some((r) => r.rating !== "None") ? h("div", { class: "mb-3" },
+      h("p", { class: "text-[10px] font-bold uppercase tracking-wider text-claude-muted mb-1.5" }, "Red flags"),
+      h("div", { class: "flex flex-wrap gap-1" }, ...f.red_flags.filter((r) => r.rating !== "None").map((r) =>
+        h("span", { class: "pill " + (r.rating === "Major" ? "pill-major" : "pill-minor") }, r.indicator + " · " + r.rating)))) : null,
+    f.overall_summary ? h("p", { class: "text-sm text-claude-ink italic border-l-2 border-claude-orange pl-3 mt-3 leading-relaxed" }, f.overall_summary) : null,
+    bundle.feedback_download_url ? h("a", {
+      class: "inline-flex items-center gap-1 mt-4 text-sm text-claude-orange-hover hover:text-claude-orange font-medium",
+      href: bundle.feedback_download_url,
+      target: "_blank",
+    }, "↓ Feedback template (.docx)") : null,
+  );
+}
+
+function viewQuestions(candidates) {
+  if (!candidates?.length) return null;
+  const idx = Math.min(state.openCandidate, candidates.length - 1);
+  const bundle = candidates[idx];
+  const tabs = candidates.map((c, i) => h("button", {
+    class: "px-3 py-2 text-sm rounded-xl flex items-center gap-2 transition-colors " +
+      (i === idx ? "bg-claude-ink text-claude-cream shadow" : "bg-claude-cream-2 text-claude-ink hover:bg-claude-orange-soft"),
+    onClick: () => { state.openCandidate = i; render(); },
+  },
+    h("div", { class: "w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold" }, initials(c.profile.full_name)),
+    c.profile.full_name,
+  ));
+
+  const grouped = {};
+  (bundle.questions?.questions || []).forEach((q) => {
+    grouped[q.category] = grouped[q.category] || [];
+    grouped[q.category].push(q);
+  });
+
+  const categoryColor = {
+    "Technical Depth": "bg-blue-100 text-blue-800",
+    "Behavioural Scenarios": "bg-purple-100 text-purple-800",
+    "Gap Probing": "bg-claude-orange-soft text-claude-orange-hover",
+    "Situational": "bg-emerald-100 text-emerald-800",
+  };
+
+  const groups = Object.entries(grouped).map(([cat, qs]) => h("div", { class: "fade-in" },
+    h("h3", { class: "text-sm font-bold mb-3 flex items-center gap-2" },
+      h("span", { class: "inline-block rounded-md px-2.5 py-1 text-xs " + (categoryColor[cat] || "bg-claude-cream-2") }, cat),
+      h("span", { class: "text-claude-muted text-xs font-normal" }, `${qs.length} questions`)),
+    h("ol", { class: "list-decimal pl-5 text-sm space-y-3 marker:text-claude-orange" },
+      qs.map((q) => h("li", { class: "pl-1" },
+        h("p", { class: "font-medium text-claude-ink" }, q.question),
+        h("p", { class: "text-xs text-claude-muted italic mt-1" }, "Why · " + q.rationale),
+        q.expected_signals?.length ? h("p", { class: "text-xs text-claude-muted mt-0.5" }, "Listen for · " + q.expected_signals.join(", ")) : null,
+      )))));
+
+  return h("section", { class: "bg-white rounded-3xl shadow-sm border border-claude-border p-5 fade-in" },
+    h("h2", { class: "text-lg font-bold text-claude-ink mb-3" }, "Interview question banks"),
+    h("div", { class: "flex flex-wrap gap-2 mb-5" }, ...tabs),
+    h("div", { class: "space-y-5" }, ...groups),
+  );
+}
+
+function viewDownloads(urls) {
+  if (!urls) return null;
+  const items = [];
+  (urls.feedback_templates_docx || []).forEach((u, i) =>
+    items.push({ url: u, label: `Feedback template ${i + 1}`, type: "DOCX", color: "bg-claude-orange" }));
+  if (urls.comparison_xlsx) items.push({ url: urls.comparison_xlsx, label: "Comparison spreadsheet", type: "XLSX", color: "bg-emerald-600" });
+  if (urls.dashboard_html) items.push({ url: urls.dashboard_html, label: "Panel dashboard", type: "HTML", color: "bg-purple-600" });
+  if (!items.length) return null;
+
+  return h("section", { class: "bg-white border border-claude-border rounded-3xl p-5 shadow-sm fade-in" },
+    h("h2", { class: "text-lg font-bold text-claude-ink mb-3" }, "Download artifacts"),
+    h("div", { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" },
+      ...items.map((it) => h("a", {
+        href: it.url, target: "_blank",
+        class: "flex items-center gap-3 p-3 border border-claude-border rounded-xl hover:border-claude-orange hover:bg-claude-orange-tint transition-all",
+      },
+        h("div", { class: `w-10 h-10 rounded-lg ${it.color} text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0` }, it.type),
+        h("div", { class: "flex-1 min-w-0" },
+          h("p", { class: "text-sm font-medium text-claude-ink truncate" }, it.label),
+          h("p", { class: "text-xs text-claude-muted" }, "Click to download"),
+        ),
+        h("span", { class: "text-claude-muted" }, "↓"),
+      ))),
+  );
+}
+
+function viewResults() {
+  const r = state.results;
+  if (!r) return null;
+  return h("div", { class: "space-y-6" },
+    h("button", {
+      class: "inline-flex items-center gap-1 text-sm text-claude-orange-hover hover:text-claude-orange font-medium",
+      onClick: resetAll,
+    }, "←  Start a new batch"),
+    viewStats(r),
+    viewChecklistCard(r.checklist),
+    viewComparison(r.comparison, r.panel_briefing),
+    viewCompliance(r.compliance_report),
+    h("section", {},
+      h("h2", { class: "text-lg font-bold text-claude-ink mb-3" }, "Candidates"),
+      h("div", { class: "grid grid-cols-1 lg:grid-cols-2 gap-4" }, ...(r.candidates || []).map(viewCandidate))),
+    viewQuestions(r.candidates || []),
+    viewDownloads(r.artifact_urls),
+  );
+}
+
+function render() {
+  root.innerHTML = "";
+  root.appendChild(h("div", { class: "space-y-6" },
+    viewError(),
+    state.view === "upload" ? viewUpload() : null,
+    state.view === "processing" ? viewProcessing() : null,
+    state.view === "results" ? viewResults() : null,
+  ));
+}
+
+render();
+getHealth();
+</script>
+
+</body>
+</html>

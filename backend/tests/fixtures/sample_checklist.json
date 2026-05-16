@@ -1,0 +1,22 @@
+{
+  "role_title": "Senior Backend Engineer",
+  "must_have_skills": [
+    {"name": "Python", "description": "5+ years production experience"},
+    {"name": "Distributed systems", "description": "Designed services at scale"}
+  ],
+  "nice_to_have_skills": [
+    {"name": "Kubernetes"},
+    {"name": "Go"}
+  ],
+  "red_flag_indicators": [
+    "Job-hopping with <12 month tenures",
+    "Unexplained gap > 12 months",
+    "Title/responsibility mismatch"
+  ],
+  "min_years_experience": 5,
+  "compliance_checks": [
+    {"name": "Background verification", "required": true, "description": "BGV consent and clearance"},
+    {"name": "Right to work", "required": true, "description": "Work authorisation confirmed"},
+    {"name": "Video consent", "required": true, "description": "Recording consent form signed"}
+  ]
+}
