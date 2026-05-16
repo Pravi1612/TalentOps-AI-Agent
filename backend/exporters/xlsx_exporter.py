@@ -1,16 +1,40 @@
+"""Render the side-by-side comparison and compliance gaps as an Excel workbook."""
+
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Iterable
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from schemas.candidate import ComparisonReport, ComplianceReport
 
+__all__ = ["write_comparison_xlsx"]
 
-def _header_cell(cell, text: str) -> None:
+_HEADER_FILL_COLOR = "1F2937"
+_DISCLAIMER = "AI-assisted analysis — recruiter review required."
+_DEFAULT_COLUMN_WIDTH = 22
+
+
+def _apply_header_style(cell: Cell, text: str) -> None:
+    """Apply the dark-grey header style and wrap-text alignment to one cell."""
     cell.value = text
     cell.font = Font(bold=True, color="FFFFFF")
-    cell.fill = PatternFill("solid", fgColor="1F2937")
+    cell.fill = PatternFill("solid", fgColor=_HEADER_FILL_COLOR)
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def _unique_preserving_order(items: Iterable[str]) -> list[str]:
+    """Return items deduplicated while preserving first-seen order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def write_comparison_xlsx(
@@ -18,46 +42,69 @@ def write_comparison_xlsx(
     compliance: ComplianceReport,
     path: Path,
 ) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Comparison"
+    """Write an Excel workbook with two sheets: comparison and compliance gaps."""
+    workbook = Workbook()
+    _write_comparison_sheet(workbook, comparison)
+    _write_compliance_sheet(workbook, compliance)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(str(path))
 
-    must_have_skills: list[str] = []
-    seen: set[str] = set()
-    for row in comparison.rows:
-        for skill in row.must_have_ratings.keys():
-            if skill not in seen:
-                seen.add(skill)
-                must_have_skills.append(skill)
 
-    headers = ["Candidate"] + must_have_skills + ["Red Flag", "Recommended Focus"]
-    for col, header in enumerate(headers, start=1):
-        _header_cell(ws.cell(row=1, column=col), header)
+def _write_comparison_sheet(workbook: Workbook, comparison: ComparisonReport) -> None:
+    sheet = workbook.active
+    sheet.title = "Comparison"
 
-    for r, row in enumerate(comparison.rows, start=2):
-        ws.cell(row=r, column=1, value=row.candidate_name)
-        for c, skill in enumerate(must_have_skills, start=2):
-            ws.cell(row=r, column=c, value=row.must_have_ratings.get(skill, "—"))
-        ws.cell(row=r, column=len(must_have_skills) + 2, value=row.red_flag_status)
-        ws.cell(
-            row=r,
+    must_have_skills = _unique_preserving_order(
+        skill for row in comparison.rows for skill in row.must_have_ratings
+    )
+    headers = ["Candidate", *must_have_skills, "Red Flag", "Recommended Focus"]
+
+    for column_index, header in enumerate(headers, start=1):
+        _apply_header_style(sheet.cell(row=1, column=column_index), header)
+
+    for row_index, row in enumerate(comparison.rows, start=2):
+        sheet.cell(row=row_index, column=1, value=row.candidate_name)
+        for col_index, skill in enumerate(must_have_skills, start=2):
+            sheet.cell(
+                row=row_index,
+                column=col_index,
+                value=row.must_have_ratings.get(skill, "—"),
+            )
+        sheet.cell(
+            row=row_index,
+            column=len(must_have_skills) + 2,
+            value=row.red_flag_status,
+        )
+        sheet.cell(
+            row=row_index,
             column=len(must_have_skills) + 3,
             value="; ".join(row.recommended_focus_areas),
         )
 
-    for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 22
+    for col_index in range(1, len(headers) + 1):
+        column_letter = sheet.cell(row=1, column=col_index).column_letter
+        sheet.column_dimensions[column_letter].width = _DEFAULT_COLUMN_WIDTH
 
-    ws.cell(row=len(comparison.rows) + 3, column=1, value="AI-assisted analysis — recruiter review required.").font = Font(italic=True)
+    disclaimer_cell = sheet.cell(
+        row=len(comparison.rows) + 3,
+        column=1,
+        value=_DISCLAIMER,
+    )
+    disclaimer_cell.font = Font(italic=True)
 
-    cs = wb.create_sheet("Compliance Gaps")
-    _header_cell(cs.cell(row=1, column=1), "Candidate")
-    _header_cell(cs.cell(row=1, column=2), "Missing Required Checks")
-    for r, gap in enumerate(compliance.gaps, start=2):
-        cs.cell(row=r, column=1, value=gap.candidate_name)
-        cs.cell(row=r, column=2, value=", ".join(gap.missing_checks) if gap.missing_checks else "None")
-    cs.column_dimensions["A"].width = 28
-    cs.column_dimensions["B"].width = 60
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(str(path))
+def _write_compliance_sheet(workbook: Workbook, compliance: ComplianceReport) -> None:
+    sheet = workbook.create_sheet("Compliance Gaps")
+    _apply_header_style(sheet.cell(row=1, column=1), "Candidate")
+    _apply_header_style(sheet.cell(row=1, column=2), "Missing Required Checks")
+
+    for row_index, gap in enumerate(compliance.gaps, start=2):
+        sheet.cell(row=row_index, column=1, value=gap.candidate_name)
+        sheet.cell(
+            row=row_index,
+            column=2,
+            value=", ".join(gap.missing_checks) if gap.missing_checks else "None",
+        )
+
+    sheet.column_dimensions["A"].width = 28
+    sheet.column_dimensions["B"].width = 60

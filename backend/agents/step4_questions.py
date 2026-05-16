@@ -1,7 +1,13 @@
+"""Step 4 — generate a tailored interview question bank per candidate."""
+
+from __future__ import annotations
+
 from llm import call_claude_structured, load_prompt
 from schemas.candidate import CandidateProfile, FitmentAnalysis
 from schemas.checklist import EvaluationChecklist
 from schemas.questions import QuestionBank
+
+__all__ = ["generate_questions"]
 
 
 def generate_questions(
@@ -12,6 +18,12 @@ def generate_questions(
     *,
     session_id: str | None = None,
 ) -> QuestionBank:
+    """Produce 10–14 interview questions across the four required categories.
+
+    The prompt explicitly forbids questions probing protected characteristics
+    (age, marital status, religion, national origin, disability) — see
+    ``backend/prompts/question_generation.md``.
+    """
     template = load_prompt("question_generation.md")
     prompt = (
         template

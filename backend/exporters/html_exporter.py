@@ -1,9 +1,19 @@
+"""Render the panel briefing dashboard as a self-contained HTML file.
+
+The output is a single ``.html`` document with inline CSS — no external assets,
+no JavaScript — so it can be e-mailed, attached to a calendar invite, or
+archived for compliance without breaking.
+"""
+
+from __future__ import annotations
+
 import html
 from pathlib import Path
-from typing import List
 
 from schemas.candidate import ComparisonReport, ComplianceReport, PanelBriefing
 from schemas.questions import QuestionBank
+
+__all__ = ["write_dashboard_html"]
 
 
 _BASE_CSS = """
@@ -24,96 +34,147 @@ ul.tight { margin: 0.25rem 0; padding-left: 1.25rem; }
 .candidate { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: white; }
 """
 
-
-def _pill(rating: str) -> str:
-    cls = "pill-" + rating.split(" ")[0]
-    return f'<span class="pill {cls}">{html.escape(rating)}</span>'
+_DISCLAIMER = "AI-assisted analysis — recruiter review required."
 
 
 def write_dashboard_html(
     comparison: ComparisonReport,
     compliance: ComplianceReport,
     briefing: PanelBriefing,
-    question_banks: List[QuestionBank],
+    question_banks: list[QuestionBank],
     path: Path,
 ) -> None:
-    must_have_skills: list[str] = []
-    seen: set[str] = set()
-    for row in comparison.rows:
-        for skill in row.must_have_ratings.keys():
-            if skill not in seen:
-                seen.add(skill)
-                must_have_skills.append(skill)
+    """Build the dashboard HTML and write it to ``path``."""
+    must_have_skills = _unique_preserving_order(
+        skill for row in comparison.rows for skill in row.must_have_ratings
+    )
 
-    parts: list[str] = []
-    parts.append(f"""<!doctype html><html><head><meta charset="utf-8"><title>TalentOps Dashboard — {html.escape(comparison.role_title)}</title><style>{_BASE_CSS}</style></head><body>""")
-    parts.append(f"<h1>Panel Briefing — {html.escape(comparison.role_title)}</h1>")
-    parts.append('<div class="disclaimer">AI-assisted analysis — recruiter review required.</div>')
+    sections = [
+        _render_header(comparison),
+        _render_briefing(briefing),
+        _render_comparison_table(comparison, must_have_skills),
+        _render_candidate_briefings(briefing),
+        _render_compliance_gaps(compliance),
+        _render_question_banks(question_banks),
+    ]
+    document = (
+        f'<!doctype html><html><head><meta charset="utf-8">'
+        f'<title>TalentOps Dashboard — {html.escape(comparison.role_title)}</title>'
+        f'<style>{_BASE_CSS}</style></head><body>'
+        + "".join(sections)
+        + "</body></html>"
+    )
 
-    parts.append(f"<section><h2>Headline</h2><p>{html.escape(briefing.headline)}</p>")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(document, encoding="utf-8")
+
+
+def _render_header(comparison: ComparisonReport) -> str:
+    return (
+        f"<h1>Panel Briefing — {html.escape(comparison.role_title)}</h1>"
+        f'<div class="disclaimer">{html.escape(_DISCLAIMER)}</div>'
+    )
+
+
+def _render_briefing(briefing: PanelBriefing) -> str:
+    parts = [f"<section><h2>Headline</h2><p>{html.escape(briefing.headline)}</p>"]
     if briefing.panel_focus_areas:
         parts.append("<h3>Panel focus areas</h3><ul class='tight'>")
-        for area in briefing.panel_focus_areas:
-            parts.append(f"<li>{html.escape(area)}</li>")
+        parts.extend(f"<li>{html.escape(area)}</li>" for area in briefing.panel_focus_areas)
         parts.append("</ul>")
     parts.append("</section>")
+    return "".join(parts)
 
-    parts.append("<section><h2>Side-by-side comparison</h2><table>")
-    parts.append("<tr><th>Candidate</th>")
-    for skill in must_have_skills:
-        parts.append(f"<th>{html.escape(skill)}</th>")
+
+def _render_comparison_table(
+    comparison: ComparisonReport,
+    must_have_skills: list[str],
+) -> str:
+    parts = ["<section><h2>Side-by-side comparison</h2><table>", "<tr><th>Candidate</th>"]
+    parts.extend(f"<th>{html.escape(skill)}</th>" for skill in must_have_skills)
     parts.append("<th>Red flag</th><th>Recommended focus</th></tr>")
+
     for row in comparison.rows:
         parts.append(f"<tr><td><strong>{html.escape(row.candidate_name)}</strong></td>")
         for skill in must_have_skills:
             rating = row.must_have_ratings.get(skill, "—")
-            parts.append(f"<td>{_pill(rating)}</td>")
-        parts.append(f"<td>{_pill(row.red_flag_status)}</td>")
+            parts.append(f"<td>{_render_pill(rating)}</td>")
+        parts.append(f"<td>{_render_pill(row.red_flag_status)}</td>")
         parts.append("<td><ul class='tight'>")
-        for fa in row.recommended_focus_areas:
-            parts.append(f"<li>{html.escape(fa)}</li>")
+        parts.extend(f"<li>{html.escape(item)}</li>" for item in row.recommended_focus_areas)
         parts.append("</ul></td></tr>")
-    parts.append("</table></section>")
 
-    parts.append("<section><h2>Per-candidate briefing</h2>")
-    for cb in briefing.per_candidate:
-        parts.append(f"<div class='candidate'><h3>{html.escape(cb.candidate_name)}</h3>")
-        parts.append("<strong>Strengths</strong><ul class='tight'>")
-        for s in cb.strengths:
-            parts.append(f"<li>{html.escape(s)}</li>")
+    parts.append("</table></section>")
+    return "".join(parts)
+
+
+def _render_candidate_briefings(briefing: PanelBriefing) -> str:
+    parts = ["<section><h2>Per-candidate briefing</h2>"]
+    for candidate in briefing.per_candidate:
+        parts.append(
+            f"<div class='candidate'><h3>{html.escape(candidate.candidate_name)}</h3>"
+            "<strong>Strengths</strong><ul class='tight'>"
+        )
+        parts.extend(f"<li>{html.escape(s)}</li>" for s in candidate.strengths)
         parts.append("</ul><strong>Gaps</strong><ul class='tight'>")
-        for g in cb.gaps:
-            parts.append(f"<li>{html.escape(g)}</li>")
+        parts.extend(f"<li>{html.escape(g)}</li>" for g in candidate.gaps)
         parts.append("</ul></div>")
     parts.append("</section>")
+    return "".join(parts)
 
-    parts.append("<section><h2>Compliance gaps</h2><table>")
-    parts.append("<tr><th>Candidate</th><th>Missing required checks</th></tr>")
+
+def _render_compliance_gaps(compliance: ComplianceReport) -> str:
+    parts = [
+        "<section><h2>Compliance gaps</h2><table>",
+        "<tr><th>Candidate</th><th>Missing required checks</th></tr>",
+    ]
     for gap in compliance.gaps:
         missing = ", ".join(gap.missing_checks) if gap.missing_checks else "None"
-        parts.append(f"<tr><td>{html.escape(gap.candidate_name)}</td><td>{html.escape(missing)}</td></tr>")
+        parts.append(
+            f"<tr><td>{html.escape(gap.candidate_name)}</td>"
+            f"<td>{html.escape(missing)}</td></tr>"
+        )
     parts.append("</table></section>")
+    return "".join(parts)
 
-    if question_banks:
-        parts.append("<section><h2>Interview question banks</h2>")
-        for bank in question_banks:
-            parts.append(f"<div class='candidate'><h3>{html.escape(bank.candidate_name)}</h3>")
-            current = None
-            for q in bank.questions:
-                if q.category != current:
-                    if current is not None:
-                        parts.append("</ul>")
-                    parts.append(f"<h4>{html.escape(q.category)}</h4><ul class='tight'>")
-                    current = q.category
+
+def _render_question_banks(question_banks: list[QuestionBank]) -> str:
+    if not question_banks:
+        return ""
+    parts = ["<section><h2>Interview question banks</h2>"]
+    for bank in question_banks:
+        parts.append(f"<div class='candidate'><h3>{html.escape(bank.candidate_name)}</h3>")
+        current_category: str | None = None
+        for question in bank.questions:
+            if question.category != current_category:
+                if current_category is not None:
+                    parts.append("</ul>")
                 parts.append(
-                    f"<li><strong>{html.escape(q.question)}</strong><br><em>{html.escape(q.rationale)}</em></li>"
+                    f"<h4>{html.escape(question.category)}</h4><ul class='tight'>"
                 )
-            if current is not None:
-                parts.append("</ul>")
-            parts.append("</div>")
-        parts.append("</section>")
+                current_category = question.category
+            parts.append(
+                f"<li><strong>{html.escape(question.question)}</strong>"
+                f"<br><em>{html.escape(question.rationale)}</em></li>"
+            )
+        if current_category is not None:
+            parts.append("</ul>")
+        parts.append("</div>")
+    parts.append("</section>")
+    return "".join(parts)
 
-    parts.append("</body></html>")
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(parts), encoding="utf-8")
+def _render_pill(rating: str) -> str:
+    """Render a colour-coded rating pill (CSS class derived from first word)."""
+    css_class = "pill-" + rating.split(" ")[0]
+    return f'<span class="pill {css_class}">{html.escape(rating)}</span>'
+
+
+def _unique_preserving_order(items) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result

@@ -30,6 +30,8 @@ Thumbs.db
 # Generated artifacts (keep dir tree via .gitkeep)
 output/**/*
 !output/**/.gitkeep
+backend/output/**/*
+!backend/output/**/.gitkeep
 
 # Logs
 backend/logs/*.jsonl
